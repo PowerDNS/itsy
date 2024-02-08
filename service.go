@@ -196,7 +196,7 @@ func toMicroHandler(handler HandlerFunc, ropts []micro.RespondOpt) micro.Handler
 			opts: ropts,
 		}
 		if err := handler(req); err != nil {
-			_ = req.Err(err)
+			_ = req.RespondErr(err)
 		}
 	}
 }

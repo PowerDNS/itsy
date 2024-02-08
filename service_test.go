@@ -68,11 +68,11 @@ func ExampleService() {
 	err = s.Run(ctx)
 	check(err)
 
-	fmt.Println("OK")
+	fmt.Println("Done")
 
 	// Output:
 	// Received: hello world
-	// OK
+	// Done
 }
 
 func check(err error) {

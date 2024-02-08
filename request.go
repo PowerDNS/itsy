@@ -6,6 +6,8 @@ import (
 	"github.com/nats-io/nats.go/micro"
 )
 
+// Request describes an Itsy service request.
+// It is modelled on the NATS micro.Request interface
 type Request struct {
 	mr   micro.Request
 	opts []micro.RespondOpt
@@ -53,9 +55,9 @@ var _ micro.Request = &Request{}
 
 // Extra extensions added by us
 
-// Err provides an easy way to return a Go error as error
+// RespondErr provides an easy way to return a Go error as error
 // Use ErrorResponse to add a custom code. Wrap can create one for you.
-func (r Request) Err(err error, opts ...micro.RespondOpt) error {
+func (r Request) RespondErr(err error, opts ...micro.RespondOpt) error {
 	code := "ERR"
 	var er ErrorResponse
 	if errors.As(err, &er) {
@@ -65,7 +67,7 @@ func (r Request) Err(err error, opts ...micro.RespondOpt) error {
 	return r.mr.Error(code, err.Error(), nil, opts...)
 }
 
-// ErrorResponse adds a description code to the error
+// ErrorResponse adds a NATS error response code to the error
 type ErrorResponse struct {
 	Code string // Code to be returned with the NATS error
 	Err  error  // Actual error
@@ -75,6 +77,7 @@ func (er ErrorResponse) Error() string {
 	return er.Err.Error()
 }
 
+// Wrap wraps an error to add a custom NATS error code for error responses
 func Wrap(err error, code string) ErrorResponse {
 	return ErrorResponse{
 		Code: code,
