@@ -6,12 +6,21 @@ import (
 	"time"
 
 	"github.com/PowerDNS/itsy"
+	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 )
 
 func ExampleService() {
-	// NOTE: This test requires a NATS server to be running on localhost:4222
-	// Simply run:   nats-server
+	// Start an in-process NATS server for this example
+	server, err := natsserver.NewServer(&natsserver.Options{
+		DontListen: true,
+	})
+	check(err)
+	server.Start()
+	defer server.Shutdown()
+	if !server.ReadyForConnections(time.Second * 5) {
+		panic("NATS server didn't start")
+	}
 
 	// Simple test configuration
 	conf := itsy.Config{
@@ -26,11 +35,11 @@ func ExampleService() {
 		VersionSemVer: "0.0.1",
 		Name:          "itsy-example",
 		Description:   "An example service",
+		ConnectOptions: []nats.Option{
+			nats.InProcessServer(server),
+		},
 	})
-	if err != nil {
-		fmt.Printf("ERROR: %v", err)
-		return
-	}
+	check(err)
 
 	s.AddHandler("echo", func(req itsy.Request) error {
 		err := req.Respond(req.Data())
@@ -40,37 +49,34 @@ func ExampleService() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	// Connect with a client and send a request after a delay
+	// Connect with a client and send a request when ready
 	go func() {
-		nc, err := nats.Connect("nats://localhost:4222")
-		if err != nil {
-			fmt.Printf("ERROR: %v", err)
-			return
-		}
+		nc, err := nats.Connect("", nats.InProcessServer(server))
+		check(err)
 		defer nc.Close()
 
 		// Wait until the service is running
-		<-s.Running
+		<-s.Ready
 
-		msg, err := nc.Request("test-itsy.echo.any.eu.nl.ams", []byte("hello world"), 100*time.Millisecond)
-		if err != nil {
-			fmt.Printf("ERROR: %v", err)
-			return
-		}
+		msg, err := nc.Request("test-itsy.echo.any.eu.nl.ams", []byte("hello world"), time.Second)
+		check(err)
 		fmt.Println("Received:", string(msg.Data))
 		cancel()
 	}()
 
 	// Run the service
 	err = s.Run(ctx)
-	if err != nil {
-		fmt.Printf("ERROR: %v", err)
-		return
-	}
+	check(err)
 
 	fmt.Println("OK")
 
 	// Output:
 	// Received: hello world
 	// OK
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

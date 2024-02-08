@@ -15,12 +15,13 @@ import (
 
 // Options for the itsy microservice
 type Options struct {
-	Config        Config
-	Logger        *slog.Logger
-	VersionSemVer string // Must be SemVer compliant, if set. Consider "0.0.0+foo" for other versions.
-	VersionFull   string // Can be any arbitrary string
-	Name          string // Service name (required)
-	Description   string // Service description
+	Config         Config
+	Logger         *slog.Logger
+	VersionSemVer  string // Must be SemVer compliant, if set. Consider "0.0.0+foo" for other versions.
+	VersionFull    string // Can be any arbitrary string
+	Name           string // Service name (required)
+	Description    string // Service description
+	ConnectOptions []nats.Option
 }
 
 func New(opt Options) (*Service, error) {
@@ -36,7 +37,7 @@ func New(opt Options) (*Service, error) {
 		conf:     opt.Config,
 		l:        opt.Logger,
 		handlers: make(map[string]HandlerFunc),
-		Running:  make(chan struct{}),
+		Ready:    make(chan struct{}),
 	}
 	return svc, nil
 }
@@ -51,9 +52,9 @@ type Service struct {
 	l        *slog.Logger
 	handlers map[string]HandlerFunc
 
-	// Running is closed when the service is up and running, which can
+	// Ready is closed when the service is up and running, which can
 	// be useful for tests
-	Running chan struct{}
+	Ready chan struct{}
 }
 
 // AddHandler registers a HandlerFunc.
@@ -73,8 +74,7 @@ func (s *Service) Run(ctx context.Context) error {
 	topoString := strings.Join(topo, " ")
 
 	// Create a NATS connection. This will automatically reconnect when needed.
-	nc, err := nats.Connect(
-		s.conf.URL,
+	connectOpts := []nats.Option{
 		nats.RetryOnFailedConnect(true),
 		nats.ConnectHandler(func(conn *nats.Conn) {
 			s.l.Info("NATS initial connection successful")
@@ -86,6 +86,11 @@ func (s *Service) Run(ctx context.Context) error {
 			s.l.Warn("NATS disconnected", "err", err)
 		}),
 		nats.MaxReconnects(-1), // never give up, defaults to 60
+	}
+	connectOpts = append(connectOpts, s.opt.ConnectOptions...)
+	nc, err := nats.Connect(
+		s.conf.URL,
+		connectOpts...,
 	)
 	if err != nil {
 		return err
@@ -174,7 +179,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.l.Info("NATS services registered", "id", svcID, "topologies", topoString)
-	close(s.Running)
+	close(s.Ready) // Signal that the service is up and running
 
 	defer s.l.Info("NATS services stopped", "id", svcID)
 
