@@ -3,6 +3,7 @@ package itsy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -22,6 +23,17 @@ type Options struct {
 	Name           string // Service name (required)
 	Description    string // Service description
 	ConnectOptions []nats.Option
+
+	// InitFunc can be used to subscribe to additional topic during startup.
+	// It is called after all the handlers have been registered.
+	InitFunc func(InitFuncParams) error
+}
+
+// InitFuncParams are parameters to be passed to a custom InitFunc.
+// It is defined as a struct to allow for future extensions without breaking
+// existing code.
+type InitFuncParams struct {
+	Conn *nats.Conn
 }
 
 func New(opt Options) (*Service, error) {
@@ -179,11 +191,29 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.l.Info("NATS services registered", "id", svcID, "topologies", topoString)
-	close(s.Ready) // Signal that the service is up and running
-
 	defer s.l.Info("NATS services stopped", "id", svcID)
 
+	// InitFunc can be used to subscribe to additional subjects
+	// TODO: Perhaps it should receive a struct to allow for future extensions?
+	if s.opt.InitFunc != nil {
+		s.l.Debug("Running custom InitFunc")
+		err := s.opt.InitFunc(InitFuncParams{
+			Conn: nc,
+		})
+		if err != nil {
+			return fmt.Errorf("error in InitFunc: %w", err)
+		}
+		s.l.Debug("Running custom InitFunc finished")
+	}
+
+	// Signal that the service is up and running
+	close(s.Ready)
+
 	// Wait until the context is closed, and then cleanly disconnect from NATS
+	// FIXME: Maybe we should change the interface to a Start and Close, allowing
+	//        additional methods to dynamically register new handlers and get information?
+	//        This would also remove the need for something like the InitFunc and Ready
+	//        signal.
 	<-ctx.Done()
 	return nc.Drain()
 }
