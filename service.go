@@ -1,9 +1,7 @@
 package itsy
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -23,20 +21,12 @@ type Options struct {
 	Name           string // Service name (required)
 	Description    string // Service description
 	ConnectOptions []nats.Option
-
-	// InitFunc can be used to subscribe to additional topic during startup.
-	// It is called after all the handlers have been registered.
-	InitFunc func(InitFuncParams) error
 }
 
-// InitFuncParams are parameters to be passed to a custom InitFunc.
-// It is defined as a struct to allow for future extensions without breaking
-// existing code.
-type InitFuncParams struct {
-	Conn *nats.Conn
-}
-
-func New(opt Options) (*Service, error) {
+// Start starts a new Itsy NATS Service in the background.
+// The returned Service object can be used to register handlers and control the
+// instance.
+func Start(opt Options) (*Service, error) {
 	if opt.Name == "" {
 		return nil, errors.New("name option is required")
 	}
@@ -45,11 +35,13 @@ func New(opt Options) (*Service, error) {
 	}
 	opt.Config = opt.Config.AddEnviron()
 	svc := &Service{
-		opt:      opt,
-		conf:     opt.Config,
-		l:        opt.Logger,
-		handlers: make(map[string]HandlerFunc),
-		Ready:    make(chan struct{}),
+		opt:  opt,
+		conf: opt.Config,
+		l:    opt.Logger,
+	}
+	err := svc.start()
+	if err != nil {
+		return nil, err
 	}
 	return svc, nil
 }
@@ -57,35 +49,89 @@ func New(opt Options) (*Service, error) {
 // HandlerFunc is a handler function. It differs from micro.Handler.
 type HandlerFunc func(req Request) error
 
+// HandlerOptions are options that influence how a handler is registered.
+// This struct is currently empty, but allows for future expansion.
+type HandlerOptions struct{}
+
 // Service is the main object that describes the microservice
 type Service struct {
-	opt      Options
-	conf     Config
-	l        *slog.Logger
-	handlers map[string]HandlerFunc
+	// Initialization
+	opt   Options
+	conf  Config
+	l     *slog.Logger
+	nc    *nats.Conn
+	svc   micro.Service
+	ropts []micro.RespondOpt
+	topo  []string
+}
 
-	// Ready is closed when the service is up and running, which can
-	// be useful for tests
-	Ready chan struct{}
+// Conn returns the underlying NATS connection
+func (s *Service) Conn() *nats.Conn {
+	return s.nc
+}
+
+// ID returns the unique service ID of this instance
+func (s *Service) ID() string {
+	return s.svc.Info().ID
 }
 
 // AddHandler registers a HandlerFunc.
-// This can only be called before calling Run.
-func (s *Service) AddHandler(name string, handler HandlerFunc) {
-	s.handlers[name] = handler
+// It returns an error if the name or an option is valid.
+func (s *Service) AddHandler(name string, handler HandlerFunc, opts *HandlerOptions) error {
+	prefix := s.conf.Prefix
+	if prefix == "" {
+		prefix = "svc"
+	}
+	svcID := s.ID()
+
+	g := s.svc.AddGroup(prefix)
+	for _, name := range ExpandTopology(name, s.topo, svcID) {
+		s.l.Info("Adding NATS endpoint", "subject", prefix+"."+name.Full)
+		q := "q"
+		if name.All {
+			// Using unique queue groups ensures that all instances respond
+			q = "id." + svcID
+		}
+		err := g.AddEndpoint(
+			strings.Replace(name.Full, ".", "-", -1),
+			toMicroHandler(handler, s.ropts),
+			micro.WithEndpointSubject(name.Full),
+			micro.WithEndpointQueueGroup(q),
+			micro.WithEndpointMetadata(map[string]string{"topo": name.Topo}),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// Run runs the NATS goroutine
-// The natsURL is the connection URL as understood by NATS
-// The topo is an optional list of dotted string topologies like "eu.amsterdam.az1"
-// Run must only be called once!
-func (s *Service) Run(ctx context.Context) error {
+// MustAddHandler registers a HandlerFunc, and panics if anything goes wrong.
+// Nothing will go wrong if the name and options are valid.
+func (s *Service) MustAddHandler(name string, handler HandlerFunc, opts *HandlerOptions) {
+	if err := s.AddHandler(name, handler, opts); err != nil {
+		panic(err)
+	}
+}
+
+// Stop stops the NATS service. Once stopped, the object cannot be used again.
+func (s *Service) Stop() {
+	err := s.nc.Drain()
+	if err != nil {
+		s.l.Warn("error while closing NATS service", "err", err)
+	}
+}
+
+// start starts the service in the background.
+func (s *Service) start() error {
 	// Topologies determine under which topics we register the service endpoints
 	topo := slices.Clone(s.conf.Topologies)
 	sort.Strings(topo)
+	s.topo = topo
 	topoString := strings.Join(topo, " ")
 
 	// Create a NATS connection. This will automatically reconnect when needed.
+	// All of these can be overridden with custom ConnectOptions.
 	connectOpts := []nats.Option{
 		nats.RetryOnFailedConnect(true),
 		nats.ConnectHandler(func(conn *nats.Conn) {
@@ -97,7 +143,7 @@ func (s *Service) Run(ctx context.Context) error {
 		nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
 			s.l.Warn("NATS disconnected", "err", err)
 		}),
-		nats.MaxReconnects(-1), // never give up, defaults to 60
+		nats.MaxReconnects(-1), // never give up, the default was 60
 	}
 	connectOpts = append(connectOpts, s.opt.ConnectOptions...)
 	nc, err := nats.Connect(
@@ -107,6 +153,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.nc = nc
 
 	// Prepare some variables we will need later
 	hostname, _ := os.Hostname()
@@ -118,11 +165,6 @@ func (s *Service) Run(ctx context.Context) error {
 	versionFull := s.opt.VersionFull
 	if versionFull == "" {
 		versionFull = versionSemVer
-	}
-
-	prefix := s.conf.Prefix
-	if prefix == "" {
-		prefix = "svc"
 	}
 
 	// Metadata that we associate with this service
@@ -148,6 +190,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.svc = svc
 	svcID := svc.Info().ID
 
 	// Our itsy services return a few common headers with every request.
@@ -162,65 +205,10 @@ func (s *Service) Run(ctx context.Context) error {
 		defaultHeaders["Service-Hostname"] = []string{hostname}
 	}
 	withDefaultHeaders := micro.WithHeaders(defaultHeaders)
-	ropts := []micro.RespondOpt{withDefaultHeaders}
-
-	// Register all handlers under all topology topics
-	// TODO: I don't like that a service is up and running before we are able
-	//       to register all its handlers. It results in a brief window in which
-	//       the service could receive a request before listening for it.
-	//       The window is likely too small to cause issues, unless the client
-	//       is checking the service endpoint info.
-	// TODO: Perhaps only register the top level one this way and use normal
-	//       NATS subscriptions to handle the topology endpoints. That would
-	//       require reimplementing the Request object, though.
-	for name, handler := range s.handlers {
-		g := svc.AddGroup(prefix)
-		for _, name := range ExpandTopology(name, topo, svcID) {
-			s.l.Info("Adding NATS endpoint", "subject", prefix+"."+name.Full)
-			q := "q"
-			if name.All {
-				// Using unique queue groups ensures that all instances respond
-				q = "id." + svcID
-			}
-			err := g.AddEndpoint(
-				strings.Replace(name.Full, ".", "-", -1),
-				toMicroHandler(handler, ropts),
-				micro.WithEndpointSubject(name.Full),
-				micro.WithEndpointQueueGroup(q),
-				micro.WithEndpointMetadata(map[string]string{"topo": name.Topo}),
-			)
-			if err != nil {
-				return err
-			}
-		}
-	}
+	s.ropts = []micro.RespondOpt{withDefaultHeaders}
 
 	s.l.Info("NATS services registered", "id", svcID, "topologies", topoString)
-	defer s.l.Info("NATS services stopped", "id", svcID)
-
-	// InitFunc can be used to subscribe to additional subjects
-	// TODO: Perhaps it should receive a struct to allow for future extensions?
-	if s.opt.InitFunc != nil {
-		s.l.Debug("Running custom InitFunc")
-		err := s.opt.InitFunc(InitFuncParams{
-			Conn: nc,
-		})
-		if err != nil {
-			return fmt.Errorf("error in InitFunc: %w", err)
-		}
-		s.l.Debug("Running custom InitFunc finished")
-	}
-
-	// Signal that the service is up and running
-	close(s.Ready)
-
-	// Wait until the context is closed, and then cleanly disconnect from NATS
-	// FIXME: Maybe we should change the interface to a Start and Close, allowing
-	//        additional methods to dynamically register new handlers and get information?
-	//        This would also remove the need for something like the InitFunc and Ready
-	//        signal.
-	<-ctx.Done()
-	return nc.Drain()
+	return nil
 }
 
 // toMicroHandler converts our HandlerFunc to a micro.HandlerFunc

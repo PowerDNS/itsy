@@ -1,7 +1,6 @@
 package itsy_test
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -29,7 +28,7 @@ func ExampleService() {
 			"eu.nl.ams",
 		},
 	}
-	s, err := itsy.New(itsy.Options{
+	s, err := itsy.Start(itsy.Options{
 		Config:        conf,
 		Logger:        nil,
 		VersionSemVer: "0.0.1",
@@ -40,33 +39,21 @@ func ExampleService() {
 		},
 	})
 	check(err)
+	defer s.Stop()
 
-	s.AddHandler("echo", func(req itsy.Request) error {
+	s.MustAddHandler("echo", func(req itsy.Request) error {
 		err := req.Respond(req.Data())
 		return err // this will try to send an error response, if not nil
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	}, nil)
 
 	// Connect with a client and send a request when ready
-	go func() {
-		nc, err := nats.Connect("", nats.InProcessServer(server))
-		check(err)
-		defer nc.Close()
-
-		// Wait until the service is running
-		<-s.Ready
-
-		msg, err := nc.Request("test-itsy.echo.any.eu.nl.ams", []byte("hello world"), time.Second)
-		check(err)
-		fmt.Println("Received:", string(msg.Data))
-		cancel()
-	}()
-
-	// Run the service
-	err = s.Run(ctx)
+	nc, err := nats.Connect("", nats.InProcessServer(server))
 	check(err)
+	defer nc.Close()
+
+	msg, err := nc.Request("test-itsy.echo.any.eu.nl.ams", []byte("hello world"), time.Second)
+	check(err)
+	fmt.Println("Received:", string(msg.Data))
 
 	fmt.Println("Done")
 

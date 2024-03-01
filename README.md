@@ -18,7 +18,7 @@ Improvements over the base NATS micro interface:
 A simple example service (error handling omitted).
 
 ```go
-func Run(ctx context.Context) error {
+func Run(ctx context.Context) {
 	// Simple example configuration
 	conf := itsy.Config{
 		URL:    "nats://localhost:4222",
@@ -33,20 +33,21 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	s, _ := itsy.New(itsy.Options{
+	s, _ := itsy.Start(itsy.Options{
 		Config:        conf,
 		VersionSemVer: "0.0.1",
 		Name:          "itsy-example",
 		Description:   "An example service",
 	})
 
-	s.AddHandler("echo", func(req itsy.Request) error {
+	s.MustAddHandler("echo", func(req itsy.Request) error {
 		err := req.Respond(req.Data())
 		return err // this will try to send an error response, if not nil
-	})
+	}, nil)
 	
-	// Run the service (blocks until it exits)
-	return s.Run(ctx)
+	// Do other things here 
+	// e.g. wait for the context to close 
+	<-ctx.Done
 }
 
 ```
