@@ -19,7 +19,7 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	s, err := itsy.New(itsy.Options{
+	s, err := itsy.Start(itsy.Options{
 		Config:        conf,
 		VersionSemVer: "0.0.1",
 		Name:          "itsy-example",
@@ -28,14 +28,16 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer s.Stop()
 
-	s.AddHandler("echo", func(req itsy.Request) error {
+	s.MustAddHandler("echo", func(req itsy.Request) error {
 		err := req.Respond(req.Data())
 		return err // this will try to send an error response, if not nil
-	})
+	}, nil)
 
 	// Run the service (blocks until it exits)
-	return s.Run(ctx)
+	<-ctx.Done()
+	return nil
 }
 
 func main() {
