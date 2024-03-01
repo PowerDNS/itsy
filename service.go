@@ -165,6 +165,11 @@ func (s *Service) Run(ctx context.Context) error {
 	ropts := []micro.RespondOpt{withDefaultHeaders}
 
 	// Register all handlers under all topology topics
+	// TODO: I don't like that a service is up and running before we are able
+	//       to register all its handlers. It results in a brief window in which
+	//       the service could receive a request before listening for it.
+	//       The window is likely too small to cause issues, unless the client
+	//       is checking the service endpoint info.
 	// TODO: Perhaps only register the top level one this way and use normal
 	//       NATS subscriptions to handle the topology endpoints. That would
 	//       require reimplementing the Request object, though.

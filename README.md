@@ -24,10 +24,12 @@ func Run(ctx context.Context) error {
 		URL:    "nats://localhost:4222",
 		Prefix: "example-services",
 		Topologies: []string{
-			"eu.nl.ams",
+			"eu.nl.ams",  
+			// ITSY_TOPO="k8s.<clusterid> foo.bar"
 		},
 		Meta: map[string]string{
 			"foo": "bar",
+			// ITSY_META_POD=foo-abc-1234
 		},
 	}
 
@@ -56,16 +58,16 @@ for debugging or operational needs.
 
 The example service shown above will listen on the following NATS subjects:
 
-- example-services.echo
-- example-services.echo.all
-- example-services.echo.all.eu
-- example-services.echo.all.eu.nl
-- example-services.echo.all.eu.nl.ams
-- example-services.echo.any
-- example-services.echo.any.eu
-- example-services.echo.any.eu.nl
-- example-services.echo.any.eu.nl.ams
-- example-services.echo.id.VFAOuXPQKaJFU9SlETBVZ8
+- example-services.itsy-example.echo
+- example-services.itsy-example.echo.all
+- example-services.itsy-example.echo.all.eu
+- example-services.itsy-example.echo.all.eu.nl
+- example-services.itsy-example.echo.all.eu.nl.ams
+- example-services.itsy-example.echo.any
+- example-services.itsy-example.echo.any.eu
+- example-services.itsy-example.echo.any.eu.nl
+- example-services.itsy-example.echo.any.eu.nl.ams
+- example-services.itsy-example.echo.id.VFAOuXPQKaJFU9SlETBVZ8
 
 A service can have multiple dotted topologies and listens on all parts of the hierarchy.
 
@@ -78,8 +80,8 @@ instance will respond.
 For example, with two of these services running, you will see the following:
 
 ```
-$ nats req example-services.echo.all --replies=2 'hello world'
-15:18:07 Sending request on "example-services.echo.all"
+$ nats req example-services.itsy-example.echo.all --replies=2 'hello world'
+15:18:07 Sending request on "example-services.itsy-example.echo.all"
 
 15:18:07 Received with rtt 388.864µs
 15:18:07 Service-Hostname: foo.local
