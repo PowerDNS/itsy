@@ -4,7 +4,7 @@ go 1.21.0
 
 require (
 	github.com/nats-io/nats-server/v2 v2.10.10
-	github.com/nats-io/nats.go v1.32.0
+	github.com/nats-io/nats.go v1.36.0
 	github.com/stretchr/testify v1.8.4
 )
 

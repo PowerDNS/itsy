@@ -13,6 +13,11 @@ type Request struct {
 	opts []micro.RespondOpt
 }
 
+// Reply returns underlying NATS message reply subject.
+func (r Request) Reply() string {
+	return r.mr.Reply()
+}
+
 // Respond sends the response for the request.
 // Additional headers can be passed using [WithHeaders] option.
 func (r Request) Respond(msg []byte, opts ...micro.RespondOpt) error {
