@@ -18,7 +18,8 @@ type Options struct {
 	Logger         *slog.Logger
 	VersionSemVer  string // Must be SemVer compliant, if set. Consider "0.0.0+foo" for other versions.
 	VersionFull    string // Can be any arbitrary string
-	Name           string // Service name (required)
+	Name           string // Service name (required); also used for subject if SubjectName is not set
+	SubjectName    string // Name part as used in subject if different from Name
 	Description    string // Service description
 	ConnectOptions []nats.Option
 }
@@ -51,7 +52,9 @@ type HandlerFunc func(req Request) error
 
 // HandlerOptions are options that influence how a handler is registered.
 // This struct is currently empty, but allows for future expansion.
-type HandlerOptions struct{}
+type HandlerOptions struct {
+	Global bool // Do not scope the subject with the service name
+}
 
 // Service is the main object that describes the microservice
 type Service struct {
@@ -81,6 +84,14 @@ func (s *Service) AddHandler(name string, handler HandlerFunc, opts *HandlerOpti
 	prefix := s.conf.Prefix
 	if prefix == "" {
 		prefix = "svc"
+	}
+	globalName := opts != nil && opts.Global
+	if !globalName {
+		svcName := s.opt.Name
+		if s.opt.SubjectName != "" {
+			svcName = s.opt.SubjectName
+		}
+		prefix += "." + svcName
 	}
 	svcID := s.ID()
 
