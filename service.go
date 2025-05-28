@@ -1,6 +1,9 @@
 package itsy
 
 import (
+	"context"
+	"crypto/tls"
+
 	"errors"
 	"log/slog"
 	"os"
@@ -8,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PowerDNS/go-tlsconfig"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 )
@@ -22,6 +26,7 @@ type Options struct {
 	SubjectName    string // Name part as used in subject if different from Name
 	Description    string // Service description
 	ConnectOptions []nats.Option
+	Context        context.Context // Context to use for the service, defaults to background context
 }
 
 // Start starts a new Itsy NATS Service in the background.
@@ -156,6 +161,35 @@ func (s *Service) start() error {
 		}),
 		nats.MaxReconnects(-1), // never give up, the default was 60
 	}
+
+	if s.conf.Username != "" {
+		connectOpts = append(connectOpts, nats.UserInfo(s.conf.Username, s.conf.Password))
+	}
+
+	if s.conf.Token != "" {
+		connectOpts = append(connectOpts, nats.Token(s.conf.Token))
+	}
+
+	// Enable TLS if configured
+	if s.conf.TLS.HasCA() || s.conf.TLS.HasCertWithKey() {
+		ctx := s.opt.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		manager, err := tlsconfig.NewManager(ctx, s.conf.TLS, tlsconfig.Options{
+			IsClient: true,
+		})
+		if err != nil {
+			return err
+		}
+		var tlsConfig *tls.Config
+		tlsConfig, err = manager.TLSConfig()
+		if err != nil {
+			return err
+		}
+		connectOpts = append(connectOpts, nats.Secure(tlsConfig))
+	}
+
 	connectOpts = append(connectOpts, s.opt.ConnectOptions...)
 	nc, err := nats.Connect(
 		s.conf.URL,
