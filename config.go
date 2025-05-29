@@ -5,6 +5,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/PowerDNS/go-tlsconfig"
 )
 
 const EnvPrefix = "ITSY_"
@@ -25,6 +27,19 @@ type Config struct {
 	// Meta defines extra key-value string metadata that needs to be exposed in
 	// the service metadata.
 	Meta map[string]string `yaml:"meta" json:"meta"` // Extra metadata to expose in the service
+
+	// TLS is the optional TLS configuration to use for the NATS connection.
+	// https://github.com/PowerDNS/go-tlsconfig
+	TLS tlsconfig.Config `yaml:"tls" json:"tls"`
+
+	// Username is the optional username to use for the NATS connection.
+	Username string `yaml:"username" json:"username"`
+
+	// Password is the optional password to use for the NATS connection.
+	Password string `yaml:"password" json:"password"`
+
+	// Token is the optional token to use for the NATS connection
+	Token string `yaml:"token" json:"token"`
 }
 
 func (c Config) AddEnviron() Config {
