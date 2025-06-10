@@ -50,14 +50,20 @@ func (c Config) AddEnviron() Config {
 		c.Prefix = v
 	}
 
-	c.Topologies = slices.Clone(c.Topologies)
+	if c.Topologies == nil {
+		c.Topologies = []string{}
+	} else {
+		c.Topologies = slices.Clone(c.Topologies)
+	}
 	if v := os.Getenv(EnvPrefix + "TOPO"); v != "" {
-		for _, t := range strings.Fields(v) {
-			c.Topologies = append(c.Topologies, t)
-		}
+		c.Topologies = append(c.Topologies, strings.Fields(v)...)
 	}
 
-	c.Meta = maps.Clone(c.Meta)
+	if c.Meta == nil {
+		c.Meta = map[string]string{}
+	} else {
+		c.Meta = maps.Clone(c.Meta)
+	}
 	metaPrefix := EnvPrefix + "META_"
 	for _, env := range os.Environ() {
 		if !strings.HasPrefix(env, metaPrefix) {
